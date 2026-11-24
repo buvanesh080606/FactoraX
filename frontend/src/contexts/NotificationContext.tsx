@@ -45,8 +45,17 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
     // Connect live WebSocket for instant cross-role notifications
     const token = getAccessToken();
     if (token) {
-      const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
-      const wsUrl = `${proto}//${window.location.host}/ws/notifications/?token=${encodeURIComponent(token)}`;
+      const apiBase = import.meta.env.VITE_API_BASE_URL || "";
+      let wsBase: string;
+      if (apiBase.startsWith("http://") || apiBase.startsWith("https://")) {
+        const u = new URL(apiBase);
+        const wsProto = u.protocol === "https:" ? "wss:" : "ws:";
+        wsBase = `${wsProto}//${u.host}`;
+      } else {
+        const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
+        wsBase = `${proto}//${window.location.host}`;
+      }
+      const wsUrl = `${wsBase}/ws/notifications/?token=${encodeURIComponent(token)}`;
       try {
         const ws = new WebSocket(wsUrl);
         wsRef.current = ws;

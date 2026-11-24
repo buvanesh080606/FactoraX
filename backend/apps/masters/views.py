@@ -233,7 +233,9 @@ class ProductViewSet(viewsets.ModelViewSet):
         with dest_path.open("wb+") as fh:
             for chunk in img.chunks():
                 fh.write(chunk)
-        return Response({"image_url": f"{settings.MEDIA_URL}products/{filename}"}, status=status.HTTP_201_CREATED)
+        rel_url = f"{settings.MEDIA_URL}products/{filename}"
+        image_url = request.build_absolute_uri(rel_url) if not settings.DEBUG else rel_url
+        return Response({"image_url": image_url}, status=status.HTTP_201_CREATED)
 
 
 class RawMaterialViewSet(viewsets.ModelViewSet):
