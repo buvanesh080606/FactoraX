@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { AlertCircle, Bell, CheckCheck, Loader2, Wifi, WifiOff, X } from "lucide-react";
+import { AlertCircle, Bell, CheckCheck, Wifi, WifiOff, X } from "lucide-react";
 import { useNotifications } from "../contexts/NotificationContext";
 import { formatDateTime } from "../utils/format";
 
@@ -111,9 +111,19 @@ export function KpiCard({
 
 export function LoadingState({ message = "Loading data..." }: { message?: string }) {
   return (
-    <div className="flex flex-col items-center justify-center py-12 text-sf-muted">
-      <Loader2 className="h-7 w-7 animate-spin text-brand-magenta" />
-      <p className="mt-2.5 text-sm font-medium">{message}</p>
+    <div className="flex flex-col items-center justify-center py-14 text-sf-muted select-none">
+      <div className="relative flex h-16 w-16 items-center justify-center">
+        <div
+          className="factorax-aura-pulse absolute inset-0 rounded-full bg-gradient-to-tr from-brand-magenta/35 via-pink-300/40 to-brand-purple/30 blur-md"
+          aria-hidden="true"
+        />
+        <img
+          src="/images/factorax-spinner.png"
+          alt="FactoraX loading"
+          className="factorax-star-spin relative h-12 w-12 object-contain drop-shadow-sm"
+        />
+      </div>
+      <p className="mt-3.5 text-sm font-semibold text-brand-purple">{message}</p>
     </div>
   );
 }

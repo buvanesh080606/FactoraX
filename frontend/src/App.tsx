@@ -4,6 +4,7 @@ import { AuthProvider, useAuth } from "./contexts/AuthContext";
 import { CartProvider } from "./contexts/CartContext";
 import { NotificationProvider } from "./contexts/NotificationContext";
 import { ProtectedRoute } from "./components/ProtectedRoute";
+import { LoadingState } from "./components/ui";
 import LoginPage from "./pages/auth/LoginPage";
 import SalesmanHomePage from "./pages/salesman/SalesmanHomePage";
 import SalesmanOrdersPage from "./pages/salesman/SalesmanOrdersPage";
@@ -17,7 +18,13 @@ import OwnerPortalPage from "./pages/owner/OwnerPortalPage";
 
 function RootRedirect() {
   const { user, loading } = useAuth();
-  if (loading) return null;
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-sf-bg">
+        <LoadingState message="Loading FactoraX..." />
+      </div>
+    );
+  }
   if (!user) return <Navigate to="/login" replace />;
   return <Navigate to={user.home_route} replace />;
 }

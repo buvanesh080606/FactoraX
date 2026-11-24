@@ -21,6 +21,40 @@
   scrollbar-width: none;
 }
 
+/* FactoraX Rotating Star Loader Animations */
+@keyframes factorax-star-spin {
+  0% {
+    transform: rotate(0deg) scale(1);
+  }
+  50% {
+    transform: rotate(180deg) scale(1.06);
+  }
+  100% {
+    transform: rotate(360deg) scale(1);
+  }
+}
+
+@keyframes factorax-aura-pulse {
+  0%,
+  100% {
+    transform: scale(0.92);
+    opacity: 0.35;
+  }
+  50% {
+    transform: scale(1.18);
+    opacity: 0.7;
+  }
+}
+
+.factorax-star-spin {
+  animation: factorax-star-spin 1.6s cubic-bezier(0.45, 0.05, 0.55, 0.95) infinite;
+  transform-origin: center center;
+}
+
+.factorax-aura-pulse {
+  animation: factorax-aura-pulse 1.6s ease-in-out infinite;
+}
+
 @layer components {
   .sf-card {
     @apply bg-[#FDF2F8] rounded-2xl border border-sf-border shadow-card;
