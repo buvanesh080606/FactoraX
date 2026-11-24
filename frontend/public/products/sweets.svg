@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 180">
+  <rect width="240" height="180" rx="18" fill="#FFF6FA"/>
+  <rect x="52" y="28" width="136" height="124" rx="14" fill="#351044"/>
+  <rect x="58" y="34" width="124" height="112" rx="10" fill="#4B1B5E"/>
+  <rect x="58" y="34" width="124" height="28" rx="10" fill="#B81762"/>
+  <text x="120" y="52" text-anchor="middle" fill="#FFFFFF" font-family="Inter,sans-serif" font-size="10.5" font-weight="700">SMARTFACTORY SWEETS</text>
+  <rect x="78" y="76" width="38" height="36" rx="6" fill="#FBBF24" stroke="#B45309" stroke-width="2"/>
+  <rect x="124" y="76" width="38" height="36" rx="6" fill="#F59E0B" stroke="#B45309" stroke-width="2"/>
+  <circle cx="97" cy="94" r="3" fill="#FEF3C7"/>
+  <circle cx="143" cy="94" r="3" fill="#FEF3C7"/>
+  <text x="120" y="136" text-anchor="middle" fill="#FFF6FA" font-family="Inter,sans-serif" font-size="11" font-weight="700">MYSORE PAK</text>
+</svg>
