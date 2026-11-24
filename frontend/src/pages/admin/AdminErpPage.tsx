@@ -142,7 +142,7 @@ export default function AdminErpPage() {
 
   const [paymentModal, setPaymentModal] = useState(false);
   const [editingPaymentId, setEditingPaymentId] = useState<number | null>(null);
-  const [paymentFilter, setPaymentFilter] = useState<"ALL" | "PENDING_DUE" | "NO_PENDING_DUE">("ALL");
+  const [paymentFilter, setPaymentFilter] = useState<"ALL" | "PENDING_DUE" | "NO_PENDING_DUE" | "REVERSED">("ALL");
   const [payForm, setPayForm] = useState({
     customer: "",
     customer_text: "",
@@ -1271,13 +1271,19 @@ export default function AdminErpPage() {
                       {
                         key: "PENDING_DUE",
                         label: `Pending Due (${
-                          payments.filter((p) => p.payment_status === "PENDING_DUE" || Number(p.pending_amount) > 0).length
+                          payments.filter((p) => p.payment_status !== "REVERSED" && (p.payment_status === "PENDING_DUE" || Number(p.pending_amount) > 0)).length
                         })`,
                       },
                       {
                         key: "NO_PENDING_DUE",
                         label: `No Pending Due (${
-                          payments.filter((p) => p.payment_status !== "PENDING_DUE" && Number(p.pending_amount) <= 0).length
+                          payments.filter((p) => p.payment_status !== "REVERSED" && p.payment_status !== "PENDING_DUE" && Number(p.pending_amount) <= 0).length
+                        })`,
+                      },
+                      {
+                        key: "REVERSED",
+                        label: `Reversed (${
+                          payments.filter((p) => p.payment_status === "REVERSED").length
                         })`,
                       },
                     ] as const
@@ -1317,88 +1323,99 @@ export default function AdminErpPage() {
                   <tbody className="divide-y divide-sf-border">
                     {payments
                       .filter((p) => {
-                        const isPend = p.payment_status === "PENDING_DUE" || Number(p.pending_amount) > 0;
+                        const isRev = p.payment_status === "REVERSED";
+                        const isPend = !isRev && (p.payment_status === "PENDING_DUE" || Number(p.pending_amount) > 0);
+                        if (paymentFilter === "REVERSED") return isRev;
                         if (paymentFilter === "PENDING_DUE") return isPend;
-                        if (paymentFilter === "NO_PENDING_DUE") return !isPend;
+                        if (paymentFilter === "NO_PENDING_DUE") return !isRev && !isPend;
                         return true;
                       })
                       .map((p) => {
-                        const isPend = p.payment_status === "PENDING_DUE" || Number(p.pending_amount) > 0;
+                        const isRev = p.payment_status === "REVERSED";
+                        const isPend = !isRev && (p.payment_status === "PENDING_DUE" || Number(p.pending_amount) > 0);
                         return (
-                          <tr key={p.id} className="hover:bg-brand-pink/35">
-                            <td className="px-4 py-3 font-bold text-brand-purple whitespace-nowrap">{p.payment_number}</td>
+                          <tr key={p.id} className={isRev ? "bg-slate-50/70 opacity-75" : "hover:bg-brand-pink/35"}>
+                            <td className="px-4 py-3 font-bold text-brand-purple whitespace-nowrap">
+                              <span className={isRev ? "line-through text-sf-muted" : ""}>{p.payment_number}</span>
+                            </td>
                             <td className="px-4 py-3 whitespace-nowrap">{formatDate(p.payment_date)}</td>
                             <td className="px-4 py-3 font-semibold">{p.customer_name}</td>
                             <td className="px-4 py-3"><StatusBadge status="APPROVED" label={p.payment_mode} /></td>
                             <td className="px-4 py-3 font-mono">{p.reference_number || "—"}</td>
-                            <td className="px-4 py-3 font-bold text-sf-success whitespace-nowrap">{formatINR(p.amount)}</td>
+                            <td className={`px-4 py-3 font-bold whitespace-nowrap ${isRev ? "line-through text-sf-muted" : "text-sf-success"}`}>{formatINR(p.amount)}</td>
                             <td className="px-4 py-3 whitespace-nowrap">
                               <StatusBadge
-                                status={isPend ? "PENDING_APPROVAL" : "CONFIRMED"}
-                                label={isPend ? "PENDING DUE" : "NO PENDING DUE"}
+                                status={isRev ? "REJECTED" : isPend ? "PENDING_APPROVAL" : "CONFIRMED"}
+                                label={isRev ? "REVERSED" : isPend ? "PENDING DUE" : "NO PENDING DUE"}
                               />
                             </td>
                             <td className={`px-4 py-3 font-extrabold whitespace-nowrap ${isPend ? "text-brand-magenta" : "text-sf-muted"}`}>
                               {formatINR(p.pending_amount || 0)}
                             </td>
                             <td className="px-4 py-3">
-                              {p.allocations.length > 0
+                              {isRev
+                                ? "Reversed (Preserved for Audit)"
+                                : p.allocations.length > 0
                                 ? p.allocations
                                     .map((a: any) => `${a.invoice_number} (${formatINR(a.allocated_amount)})`)
                                     .join(", ")
                                 : "Manual / Direct"}
                             </td>
                             <td className="px-4 py-3 whitespace-nowrap">
-                              <div className="flex items-center gap-1.5">
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    setEditingPaymentId(p.id);
-                                    setPayForm({
-                                      customer: String(p.customer),
-                                      customer_text: p.customer_name || "",
-                                      invoice: p.allocations?.[0]?.invoice
-                                        ? String(p.allocations[0].invoice)
-                                        : "",
-                                      amount: String(p.amount),
-                                      payment_status: isPend ? "PENDING_DUE" : "NO_PENDING_DUE",
-                                      pending_amount: isPend ? String(p.pending_amount || "") : "",
-                                      payment_date: p.payment_date || getLocalDateInputValue(),
-                                      payment_mode: p.payment_mode || "UPI",
-                                      reference_number: p.reference_number || "",
-                                      notes: p.notes || "",
-                                    });
-                                    setPaymentModal(true);
-                                  }}
-                                  className="sf-btn-secondary py-1 px-2 text-[11px]"
-                                  title="Edit payment"
-                                >
-                                  <Pencil className="h-3 w-3" /> Edit
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={async () => {
-                                    if (
-                                      !window.confirm(
-                                        `Remove payment ${p.payment_number} (${formatINR(p.amount)})? This will restore the customer's outstanding balance.`
-                                      )
-                                    ) {
-                                      return;
-                                    }
-                                    try {
-                                      await api.delete(`/sales/payments/${p.id}/`);
-                                      showToast(`Removed payment ${p.payment_number} (logged in audit trail).`);
-                                      loadSection();
-                                    } catch (err) {
-                                      setError(extractErrorMessage(err));
-                                    }
-                                  }}
-                                  className="inline-flex items-center gap-1 rounded-lg border border-red-200 bg-red-50 px-2 py-1 text-[11px] font-bold text-red-700 hover:bg-red-100"
-                                  title="Remove payment"
-                                >
-                                  <Trash2 className="h-3 w-3" /> Remove
-                                </button>
-                              </div>
+                              {isRev ? (
+                                <span className="text-[11px] font-semibold text-sf-muted">Audit Preserved</span>
+                              ) : (
+                                <div className="flex items-center gap-1.5">
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setEditingPaymentId(p.id);
+                                      setPayForm({
+                                        customer: String(p.customer),
+                                        customer_text: p.customer_name || "",
+                                        invoice: p.allocations?.[0]?.invoice
+                                          ? String(p.allocations[0].invoice)
+                                          : "",
+                                        amount: String(p.amount),
+                                        payment_status: isPend ? "PENDING_DUE" : "NO_PENDING_DUE",
+                                        pending_amount: isPend ? String(p.pending_amount || "") : "",
+                                        payment_date: p.payment_date || getLocalDateInputValue(),
+                                        payment_mode: p.payment_mode || "UPI",
+                                        reference_number: p.reference_number || "",
+                                        notes: p.notes || "",
+                                      });
+                                      setPaymentModal(true);
+                                    }}
+                                    className="sf-btn-secondary py-1 px-2 text-[11px]"
+                                    title="Edit payment (logged in audit trail)"
+                                  >
+                                    <Pencil className="h-3 w-3" /> Edit
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={async () => {
+                                      if (
+                                        !window.confirm(
+                                          `Reverse payment ${p.payment_number} (${formatINR(p.amount)})?\nThe customer's outstanding balance will be restored and this payment record will be preserved as REVERSED for audit.`
+                                        )
+                                      ) {
+                                        return;
+                                      }
+                                      try {
+                                        const res = await api.delete(`/sales/payments/${p.id}/`);
+                                        showToast(res.data?.detail || `Reversed payment ${p.payment_number} (preserved for audit).`);
+                                        loadSection();
+                                      } catch (err) {
+                                        setError(extractErrorMessage(err));
+                                      }
+                                    }}
+                                    className="inline-flex items-center gap-1 rounded-lg border border-red-200 bg-red-50 px-2 py-1 text-[11px] font-bold text-red-700 hover:bg-red-100"
+                                    title="Reverse payment (preserves audit record)"
+                                  >
+                                    <Trash2 className="h-3 w-3" /> Reverse
+                                  </button>
+                                </div>
+                              )}
                             </td>
                           </tr>
                         );

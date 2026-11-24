@@ -21,7 +21,7 @@ from apps.accounts.permissions import (
 from apps.inventory.models import StockItemType, StockLedger
 from apps.inventory.services import build_inventory_summary
 from apps.masters.models import Customer, Product
-from apps.production.models import ProductionConsumption, ProductionRun
+from apps.production.models import ProductionConsumption, ProductionRun, ProductionStatus
 from apps.purchases.models import Purchase, PurchaseStatus
 from apps.reports.exporters import export_csv, export_pdf, export_xlsx
 from apps.sales.models import (
@@ -30,6 +30,7 @@ from apps.sales.models import (
     OrderStatus,
     Payment,
     PaymentAllocation,
+    PaymentStatus,
     SalesOrder,
 )
 from apps.sales.services import (
@@ -143,7 +144,7 @@ class ProductionDashboardView(APIView):
     permission_classes = [role_permission(INTERNAL_ROLES, INTERNAL_ROLES)]
 
     def get(self, request):
-        runs = ProductionRun.objects.select_related("product").all()
+        runs = ProductionRun.objects.select_related("product").exclude(status=ProductionStatus.CANCELLED)
         total_runs = runs.count()
         total_output = sum((r.actual_good_output_qty for r in runs), Decimal("0.000"))
         flagged_runs = runs.filter(has_variance_flag=True).count()
@@ -291,7 +292,9 @@ class OwnerDashboardView(APIView):
         pending_orders = SalesOrder.objects.filter(
             status__in=[OrderStatus.SUBMITTED, OrderStatus.PENDING_APPROVAL]
         ).count()
-        total_collections = _sum_decimal(Payment.objects.all(), "amount")
+        total_collections = _sum_decimal(
+            Payment.objects.exclude(payment_status=PaymentStatus.REVERSED), "amount"
+        )
         outstanding_map = get_bulk_customer_outstanding()
         total_outstanding = sum(outstanding_map.values(), ZERO)
 
@@ -312,7 +315,9 @@ class OwnerDashboardView(APIView):
             r for r in inv_summary if r["status"] in ("LOW_STOCK", "OUT_OF_STOCK")
         ]
 
-        runs = list(ProductionRun.objects.select_related("product").all())
+        runs = list(
+            ProductionRun.objects.select_related("product").exclude(status=ProductionStatus.CANCELLED)
+        )
         total_prod_output = sum((r.actual_good_output_qty for r in runs), Decimal("0.000"))
         avg_yield_var = (
             (sum((r.yield_variance_pct for r in runs), ZERO) / len(runs)).quantize(Decimal("0.01"))
@@ -353,6 +358,7 @@ class OwnerDashboardView(APIView):
                 "unit",
             )
             .filter(is_variance_flagged=True)
+            .exclude(production_run__status=ProductionStatus.CANCELLED)
             .order_by("-production_run__run_date", "-id")[:25]
         )
         for c in flagged_cons:
@@ -764,7 +770,9 @@ def _build_report_data(
         return _filter_and_return("Stock Ledger", cols, rows, {"entries": len(rows)}, search)
 
     if report_key == "production-report":
-        qs = ProductionRun.objects.select_related("product", "supervised_by").all()
+        qs = ProductionRun.objects.select_related("product", "supervised_by").exclude(
+            status=ProductionStatus.CANCELLED
+        )
         if date_from:
             qs = qs.filter(run_date__gte=date_from)
         if date_to:
@@ -800,7 +808,7 @@ def _build_report_data(
     if report_key == "consumption-variance":
         qs = ProductionConsumption.objects.select_related(
             "production_run", "production_run__product", "raw_material", "packaging_material", "unit"
-        ).all()
+        ).exclude(production_run__status=ProductionStatus.CANCELLED)
         if date_from:
             qs = qs.filter(production_run__run_date__gte=date_from)
         if date_to:
@@ -836,7 +844,7 @@ def _build_report_data(
         return _filter_and_return("Planned vs Actual Consumption", cols, rows, {"records": len(rows)}, search)
 
     if report_key == "yield-wastage":
-        qs = ProductionRun.objects.select_related("product").all()
+        qs = ProductionRun.objects.select_related("product").exclude(status=ProductionStatus.CANCELLED)
         if date_from:
             qs = qs.filter(run_date__gte=date_from)
         if date_to:
@@ -882,12 +890,13 @@ def _build_report_data(
                 "payment_date": str(p.payment_date),
                 "customer_name": p.customer.name,
                 "payment_mode": p.payment_mode,
+                "status": p.payment_status,
                 "reference_number": p.reference_number or "-",
                 "amount": str(p.amount),
                 "allocated_invoices": ", ".join(
                     f"{a.invoice.invoice_number} (Rs.{a.allocated_amount})"
                     for a in p.allocations.all()
-                ) or "Unallocated",
+                ) or ("Reversed" if p.payment_status == PaymentStatus.REVERSED else "Unallocated"),
                 "recorded_by": p.recorded_by.full_name if p.recorded_by else "System",
             }
             for p in qs
@@ -897,12 +906,20 @@ def _build_report_data(
             ("payment_date", "Date"),
             ("customer_name", "Customer"),
             ("payment_mode", "Mode"),
+            ("status", "Status"),
             ("reference_number", "Ref No"),
             ("amount", "Amount (Rs)"),
             ("allocated_invoices", "Invoice Allocations"),
             ("recorded_by", "Recorded By"),
         ]
-        summary = {"total_collected": str(sum((Decimal(r["amount"]) for r in rows), ZERO))}
+        summary = {
+            "total_collected": str(
+                sum(
+                    (Decimal(r["amount"]) for r in rows if r["status"] != PaymentStatus.REVERSED),
+                    ZERO,
+                )
+            )
+        }
         return _filter_and_return("Payments Register", cols, rows, summary, search)
 
     if report_key == "outstanding-ageing":
@@ -948,7 +965,7 @@ def _build_report_data(
         return _filter_and_return("Outstanding Ageing Report", cols, rows, summary, search)
 
     if report_key == "product-costing":
-        qs = ProductionRun.objects.select_related("product").all()
+        qs = ProductionRun.objects.select_related("product").exclude(status=ProductionStatus.CANCELLED)
         if date_from:
             qs = qs.filter(run_date__gte=date_from)
         if date_to:

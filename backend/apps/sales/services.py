@@ -947,6 +947,8 @@ def update_payment(
         .get(pk=payment_id)
     )
     old_amount = payment.amount
+    if payment.payment_status == PaymentStatus.REVERSED:
+        raise ValueError(f"{payment.payment_number} has been reversed and cannot be edited.")
     new_amount = _q2(amount) if amount is not None else payment.amount
     if new_amount <= 0:
         raise ValueError("Payment amount must be greater than zero.")
@@ -1001,24 +1003,35 @@ def update_payment(
 
 @transaction.atomic
 def delete_payment(*, payment_id: int, user, request=None) -> dict:
+    """
+    Audit-safe payment reversal: preserves the original Payment record forever with
+    status=REVERSED, removes its invoice allocations so customer/invoice outstanding
+    balances recalculate accurately, and logs REVERSE_PAYMENT in the AuditLog.
+    """
     payment = (
         Payment.objects.select_for_update()
         .select_related("customer")
         .get(pk=payment_id)
     )
+    if payment.payment_status == PaymentStatus.REVERSED:
+        raise ValueError(f"{payment.payment_number} is already reversed.")
     info = {
         "id": payment.id,
         "payment_number": payment.payment_number,
         "customer_name": payment.customer.name,
         "amount": str(payment.amount),
     }
-    payment.delete()
+    payment.allocations.all().delete()
+    payment.payment_status = PaymentStatus.REVERSED
+    payment.pending_amount = ZERO_MONEY
+    payment.notes = f"{payment.notes} [REVERSED]".strip()
+    payment.save(update_fields=["payment_status", "pending_amount", "notes"])
     log_audit(
         user=user,
-        action="DELETE_PAYMENT",
+        action="REVERSE_PAYMENT",
         entity_type="Payment",
         entity_id=info["id"],
-        summary=f"Removed payment {info['payment_number']} (Rs.{info['amount']}) for {info['customer_name']}.",
+        summary=f"Reversed payment {info['payment_number']} (Rs.{info['amount']}) for {info['customer_name']} (record preserved for audit).",
         request=request,
     )
     return info

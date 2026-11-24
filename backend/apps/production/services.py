@@ -465,6 +465,9 @@ def update_production_run(
     settings_obj = CompanySetting.get_solo()
     tolerance_pct = settings_obj.variance_tolerance_pct
 
+    if run.status == ProductionStatus.CANCELLED:
+        raise ValueError(f"{run.run_number} has already been cancelled/reversed and cannot be edited.")
+
     old_good = run.actual_good_output_qty
     new_good = _quant3(Decimal(str(data.get("actual_good_output_qty", old_good))))
     new_wastage = _quant3(Decimal(str(data.get("wastage_qty", run.wastage_qty))))
@@ -570,10 +573,15 @@ def delete_production_run(
     request=None,
 ) -> str:
     """
-    Atomically removes a production run by posting reversing ADJUSTMENT entries to the
-    append-only StockLedger (deducting finished output and restoring issued materials),
-    cleaning linked overhead expenses, and logging an audit entry.
+    Audit-safe cancellation/reversal of a production run:
+    Never hard-deletes the posted ProductionRun record. Instead, posts reversing
+    ADJUSTMENT entries to the append-only StockLedger (deducting finished output and
+    restoring issued materials), marks status=CANCELLED, removes non-posted overhead
+    expenses, and records a CANCEL_PRODUCTION_RUN entry in the AuditLog.
     """
+    if run.status == ProductionStatus.CANCELLED:
+        raise ValueError(f"{run.run_number} is already cancelled/reversed.")
+
     run_number = run.run_number
     product_name = run.product.name
     run_id = run.id
@@ -588,7 +596,7 @@ def delete_production_run(
             source_type="PRODUCTION_RUN_REVERSAL",
             source_id=str(run.id),
             reference_no=run_number,
-            notes=f"Reversed finished output on removal of {run_number}",
+            notes=f"Reversed finished output on cancellation of {run_number}",
             user=user,
         )
 
@@ -612,19 +620,21 @@ def delete_production_run(
                 source_type="PRODUCTION_RUN_REVERSAL",
                 source_id=str(run.id),
                 reference_no=run_number,
-                notes=f"Restored material on removal of {run_number} ({product_name})",
+                notes=f"Restored material on cancellation of {run_number} ({product_name})",
                 user=user,
             )
 
     Expense.objects.filter(production_run=run).delete()
-    run.delete()
+    run.status = ProductionStatus.CANCELLED
+    run.notes = f"{run.notes} [CANCELLED / REVERSED]".strip()
+    run.save(update_fields=["status", "notes", "updated_at"])
 
     log_audit(
         user=user,
-        action="DELETE_PRODUCTION_RUN",
+        action="CANCEL_PRODUCTION_RUN",
         entity_type="ProductionRun",
         entity_id=run_id,
-        summary=f"Removed {run_number} ({product_name}) and posted reversing stock adjustments.",
+        summary=f"Cancelled {run_number} ({product_name}), reversed stock in ledger, and preserved record for audit.",
         request=request,
     )
     return run_number

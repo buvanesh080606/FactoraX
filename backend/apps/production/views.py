@@ -7,7 +7,7 @@ from rest_framework.views import APIView
 
 from apps.accounts.permissions import INTERNAL_ROLES, PRODUCTION_WRITE, role_permission
 from apps.inventory.services import InsufficientStockError
-from apps.production.models import Expense, ProductionConsumption, ProductionRun
+from apps.production.models import Expense, ProductionConsumption, ProductionRun, ProductionStatus
 from apps.production.serializers import (
     ExpenseSerializer,
     ProductionRunCreateSerializer,
@@ -112,8 +112,8 @@ class ProductionRunViewSet(viewsets.ModelViewSet):
             return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
         return Response(
             {
-                "deleted": True,
-                "detail": f"Removed {run_number} and reversed its stock entries in the ledger.",
+                "reversed": True,
+                "detail": f"Cancelled {run_number}, reversed stock in ledger, and preserved the record for audit.",
             }
         )
 
@@ -150,7 +150,7 @@ class VarianceReportView(APIView):
             "raw_material",
             "packaging_material",
             "unit",
-        ).order_by("-production_run__run_date", "-id")
+        ).exclude(production_run__status=ProductionStatus.CANCELLED).order_by("-production_run__run_date", "-id")
         if flagged_only:
             qs = qs.filter(is_variance_flagged=True)
         rows = [

@@ -17,6 +17,7 @@ from apps.masters.models import (
 class ProductionStatus(models.TextChoices):
     DRAFT = "DRAFT", "Draft"
     CONFIRMED = "CONFIRMED", "Confirmed"
+    CANCELLED = "CANCELLED", "Cancelled / Reversed"
 
 
 class ProductionRun(models.Model):

@@ -223,6 +223,7 @@ class PaymentMode(models.TextChoices):
 class PaymentStatus(models.TextChoices):
     PENDING_DUE = "PENDING_DUE", "Pending Due"
     NO_PENDING_DUE = "NO_PENDING_DUE", "No Pending Due"
+    REVERSED = "REVERSED", "Reversed / Cancelled"
 
 
 class Payment(models.Model):

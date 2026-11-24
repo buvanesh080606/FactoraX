@@ -377,12 +377,22 @@ class PaymentViewSet(viewsets.ModelViewSet):
     def destroy(self, request, *args, **kwargs):
         if request.user.role not in ADMIN_OWNER:
             return Response(
-                {"detail": "Only Admin or Owner can remove payment records."},
+                {"detail": "Only Admin or Owner can reverse payment records."},
                 status=status.HTTP_403_FORBIDDEN,
             )
         payment = self.get_object()
-        info = delete_payment(payment_id=payment.id, user=request.user, request=request)
-        return Response({"deleted": True, **info}, status=status.HTTP_200_OK)
+        try:
+            info = delete_payment(payment_id=payment.id, user=request.user, request=request)
+        except ValueError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(
+            {
+                "reversed": True,
+                "detail": f"Reversed {info['payment_number']} (Rs.{info['amount']}) — record preserved for audit.",
+                **info,
+            },
+            status=status.HTTP_200_OK,
+        )
 
 
 class ReceivablesAgeingView(APIView):

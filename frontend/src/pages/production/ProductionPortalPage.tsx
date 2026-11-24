@@ -270,7 +270,7 @@ export default function ProductionPortalPage() {
   const handleRemoveRun = async (r: ProductionRun) => {
     if (
       !window.confirm(
-        `Remove production run ${r.run_number} (${r.product_name})?\nThis will automatically reverse its finished stock and restore raw/packaging materials in PostgreSQL.`
+        `Cancel & reverse production run ${r.run_number} (${r.product_name})?\nStock entries will be reversed in the append-only ledger and this run will be preserved as CANCELLED for audit.`
       )
     ) {
       return;
@@ -279,7 +279,7 @@ export default function ProductionPortalPage() {
     setSuccess(null);
     try {
       const res = await api.delete(`/production/runs/${r.id}/`);
-      setSuccess(res.data?.detail || `Removed ${r.run_number} and reversed stock.`);
+      setSuccess(res.data?.detail || `Cancelled ${r.run_number} and reversed stock in ledger.`);
       await loadAll();
     } catch (err) {
       setError(extractErrorMessage(err));
@@ -1192,9 +1192,16 @@ export default function ProductionPortalPage() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-sf-border">
-                    {runs.map((r) => (
-                      <tr key={r.id} className="hover:bg-brand-pink/30">
-                        <td className="px-4 py-3 font-bold text-brand-purple">{r.run_number}</td>
+                    {runs.map((r) => {
+                      const isCancelled = r.status === "CANCELLED";
+                      return (
+                      <tr key={r.id} className={isCancelled ? "bg-slate-50/70 opacity-75" : "hover:bg-brand-pink/30"}>
+                        <td className="px-4 py-3 font-bold text-brand-purple">
+                          <div className="flex flex-col gap-1">
+                            <span className={isCancelled ? "line-through text-sf-muted" : ""}>{r.run_number}</span>
+                            {isCancelled && <StatusBadge status="REJECTED" label="CANCELLED" />}
+                          </div>
+                        </td>
                         <td className="px-4 py-3">{formatDate(r.run_date)}</td>
                         <td className="px-4 py-3 font-semibold">
                           {r.product_name} ({r.product_pack_size})
@@ -1203,8 +1210,8 @@ export default function ProductionPortalPage() {
                         <td className="px-4 py-3 font-bold">{formatQty(r.actual_good_output_qty)}</td>
                         <td className="px-4 py-3">
                           <StatusBadge
-                            status={r.has_variance_flag ? "FLAGGED" : "OK"}
-                            label={`${r.yield_variance_pct}%`}
+                            status={isCancelled ? "DRAFT" : r.has_variance_flag ? "FLAGGED" : "OK"}
+                            label={isCancelled ? "REVERSED" : `${r.yield_variance_pct}%`}
                           />
                         </td>
                         <td className="px-4 py-3">{formatINR(r.total_production_cost)}</td>
@@ -1223,26 +1230,31 @@ export default function ProductionPortalPage() {
                             >
                               Breakdown
                             </button>
-                            <button
-                              type="button"
-                              onClick={() => openEditRunModal(r)}
-                              className="sf-btn-secondary py-1 px-2 text-[11px]"
-                              title="Edit Production Run"
-                            >
-                              <Pencil className="h-3 w-3" /> Edit
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => handleRemoveRun(r)}
-                              className="inline-flex items-center gap-1 rounded-lg border border-red-200 bg-red-50 px-2 py-1 text-[11px] font-bold text-red-700 hover:bg-red-100"
-                              title="Remove Production Run"
-                            >
-                              <Trash2 className="h-3 w-3" /> Remove
-                            </button>
+                            {!isCancelled && (
+                              <>
+                                <button
+                                  type="button"
+                                  onClick={() => openEditRunModal(r)}
+                                  className="sf-btn-secondary py-1 px-2 text-[11px]"
+                                  title="Edit Production Run (logged in audit trail)"
+                                >
+                                  <Pencil className="h-3 w-3" /> Edit
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleRemoveRun(r)}
+                                  className="inline-flex items-center gap-1 rounded-lg border border-red-200 bg-red-50 px-2 py-1 text-[11px] font-bold text-red-700 hover:bg-red-100"
+                                  title="Cancel & reverse production run (preserves audit record)"
+                                >
+                                  <Trash2 className="h-3 w-3" /> Reverse
+                                </button>
+                              </>
+                            )}
                           </div>
                         </td>
                       </tr>
-                    ))}
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
