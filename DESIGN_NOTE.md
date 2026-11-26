@@ -1,79 +1,67 @@
-# FactoraX ERP — Architecture & Design Note
+# FactoraX ERP — Design Note (Order-to-Audit System)
 
-**Assignment:** Order-to-Audit System for a Small Food Manufacturer  
-**Institution:** Centre for Digital Infrastructure, NIT Tiruchirappalli  
-**Stack:** React 18 + TypeScript + Tailwind CSS (Vite) · Django 5 + DRF + Channels (ASGI) · PostgreSQL 16 (Neon)
+**Institution:** Centre for Digital Infrastructure, NIT Tiruchirappalli · **Stack:** React 18 (Vite/TS) · Django 5 + DRF + Channels (ASGI) · PostgreSQL 16 (Neon)
 
 ---
 
-## 1. System Design & Data Model
+## 1. Data Model & ER Diagram
 
-FactoraX links two operational loops at a single, immutable source of truth — **`inventory_stockledger`**:
-
-- **Sales Loop:** Salesman Mobile Order → Admin Verification (Qty/Price Edit + Live Stock Check) → GST Invoice (`CGST+SGST` intra-state or `IGST` inter-state, FY-numbered, ReportLab PDF) → Dispatch (`SALES_DISPATCH` ledger issue) → Payment Allocation & Ageing (or Audit Credit Note).
-- **Production Loop:** Supplier Purchase (`PURCHASE_RECEIPT` ledger receipt + Weighted Average update) → Active BOM Recipe (with unit conversions) → Atomic Production Run (`PRODUCTION_ISSUE` raw & packaging deductions including damaged packaging + `PRODUCTION_OUTPUT` good finished packets) → Variance Alerts (>3%) & Product Costing.
+FactoraX connects **Sales** and **Production** at **`StockLedger`** (`inventory_stockledger`). Every transaction is captured once at its source and atomically updates stock, batch costing, receivables, and audit logs inside PostgreSQL `NUMERIC` (`Decimal`) transactions.
 
 ```mermaid
 erDiagram
     User ||--o{ Customer : "assigned_salesman"
-    Unit ||--o{ Unit : "base_unit / factor"
-    Product ||--o{ BOM : "recipes"
-    BOM ||--o{ BOMItem : "standard_materials"
+    Unit ||--o{ Unit : "base_unit * factor"
+    Product ||--o{ BOM : "active_recipe"
+    BOM ||--o{ BOMItem : "raw_and_pkg"
     Supplier ||--o{ Purchase : "supplies"
     Purchase ||--o{ PurchaseItem : "receipts"
     Product ||--o{ ProductionRun : "batches"
     ProductionRun ||--o{ ProductionConsumption : "planned_vs_actual"
     ProductionRun ||--o{ Expense : "overheads"
-    Customer ||--o{ SalesOrder : "places"
+    Customer ||--o{ SalesOrder : "orders"
     SalesOrder ||--o{ SalesOrderItem : "lines"
     SalesOrder ||--o| Invoice : "gst_bill"
     Invoice ||--o{ InvoiceItem : "tax_lines"
     Invoice ||--o{ Dispatch : "stock_release"
     Invoice ||--o{ PaymentAllocation : "collections"
-    Invoice ||--o{ CreditNote : "audit_reversals"
+    Invoice ||--o{ CreditNote : "audit_cancel"
 ```
 
----
-
-## 2. Ledger-Driven Inventory & Unit Conversion
-
-### Single Source of Truth (`StockLedger`)
-- Stock balances are **never** stored as manually editable numbers. Every balance is aggregated from append-only `StockLedger` rows:
-  $$\text{Closing Stock} = \text{Opening} + \text{Receipts} - \text{Issues} + \text{Adjustments}$$
-- Every ledger row stores `source_type` (`OPENING`, `PURCHASE`, `PRODUCTION_RUN`, `DISPATCH`, `CREDIT_NOTE`, `ADJUSTMENT`), `source_id`, `reference_no`, `unit_cost`, `running_balance`, `created_by`, and `created_at`.
-- **Concurrency Safety:** `record_stock_movement()` executes inside `@transaction.atomic` with `select_for_update()` on the item master row (`RawMaterial`, `PackagingMaterial`, or `Product`), rejecting any issue that would produce negative inventory (verified via multi-threaded PostgreSQL tests).
-
-### BOM & Unit Conversion Engine
-- `Unit` supports hierarchical conversions via `(base_unit, factor_to_base)` using `Decimal` arithmetic:
-  - `1 kg = 1,000 g` (`g.factor_to_base = 0.001000`)
-  - `1 L = 1,000 ml` (`ml.factor_to_base = 0.001000`)
-  - `1 carton = 20 packets` (`ctn.factor_to_base = 20.000000`)
-- When planning or executing a production run, BOM items and actual consumption inputs entered in any compatible unit (e.g., `1200 g` for Spice Mix stocked in `kg`) are converted to the material's inventory unit before computing variance and posting `PRODUCTION_ISSUE` ledger entries.
-- **Damaged Packaging Rule:** Total issued packaging deducted from inventory is `actual_good_used + damaged_qty` (e.g., `188 + 6 = 194` pouches deducted from `500` → `306` closing).
-
-### Variance Formulas (3% Default Tolerance)
-- **Consumption Variance %:** $\frac{\text{Total Issued} - \text{Planned}}{\text{Planned}} \times 100$ (e.g., Oil: $\frac{10.5 - 10.0}{10.0} \times 100 = +5.00\%$, flagged)
-- **Yield Variance %:** $\frac{\text{Actual Good Output} - \text{Expected Output}}{\text{Expected Output}} \times 100$ (e.g., $\frac{188 - 200}{200} \times 100 = -6.00\%$, flagged)
+- **Masters (`accounts`, `masters`):** `User` (5 roles), `Customer` (state, GSTIN, credit limit, assigned salesman), `Supplier`, `Unit` (hierarchical `base_unit` + `factor_to_base`), `RawMaterial`, `PackagingMaterial`, `Product` (HSN, GST %, selling price), `BOM`, and `BOMItem`.
+- **Operations & Audit (`inventory`, `purchases`, `production`, `sales`):** Append-only `StockLedger` + `AuditLog`; `Purchase`/`PurchaseItem`; `ProductionRun`/`ProductionConsumption`/`Expense`; `SalesOrder`/`Invoice`/`Dispatch`/`Payment`/`PaymentAllocation`/`CreditNote`.
 
 ---
 
-## 3. Costing, Valuation & Tax Integrity
+## 2. How Stock & BOM Consumption Are Computed
 
-### Material Valuation: Moving Weighted Average Cost
-- Selected over Last Price (which distorts cost when rates spike) and FIFO (which requires batch-lot tracking for bulk flour/oil bins).
-- On every `OPENING` or `PURCHASE_RECEIPT` movement, `weighted_avg_cost` updates atomically:
-  $$\text{New Avg Cost} = \frac{(\text{Existing Qty} \times \text{Old Avg}) + (\text{Receipt Qty} \times \text{Purchase Rate})}{\text{Existing Qty} + \text{Receipt Qty}}$$
-- **Benchmark Flour Valuation:** Opening `100 kg @ ₹42` + Purchase `60 kg @ ₹45` = `₹6,900 / 160 kg = ₹43.1250/kg`.
+### Append-Only Stock Ledger (`StockLedger`)
+- Closing stock is **never** overwritten directly; every balance is computed from immutable movement rows (`OPENING`, `PURCHASE_RECEIPT`, `PRODUCTION_ISSUE`, `PRODUCTION_OUTPUT`, `SALES_DISPATCH`, `RETURN`, `ADJUSTMENT`):
+  $$\text{Closing Balance} = \text{Opening} + \text{Receipts} - \text{Issues} \pm \text{Adjustments}$$
+- Each entry links back to `(source_type, source_id, reference_no, unit_cost, running_balance, created_by)`.
+- **Concurrency & Non-Negative Guard:** `record_stock_movement()` runs inside `@transaction.atomic` with PostgreSQL `SELECT ... FOR UPDATE` (`select_for_update()`) on the master item row. Any issue where $\text{balance} + \Delta < 0$ raises `InsufficientStockError` and rolls back the entire transaction (verified by multi-threaded pytest concurrency tests and Distributor B's 32-packet shortage check).
 
-### Overhead Allocation & Cost per Good Packet
-- Direct batch overheads (**Labour** + **Gas/Power** + **Other**) are recorded against each `ProductionRun` (and mirrored into `production_expense`) and allocated across **Actual Good Packets** produced, so yield loss naturally increases unit cost:
-  $$\text{Cost per Good Packet} = \frac{\text{Actual Raw Cost} + \text{Actual Packaging Cost (incl. damaged)} + \text{Batch Overheads}}{\text{Actual Good Packets}}$$
-- **Section 5 Benchmark Breakdown (188 good packets):**
-  - Raw Materials: Flour (`40 × ₹43.125 = ₹1,725`) + Oil (`10.5 × ₹140 = ₹1,470`) + Spice (`1.2 × ₹200 = ₹240`) = **₹3,435.00**
-  - Packaging: Pouches (`194 × ₹2.50 = ₹485`) + Cartons (`9 × ₹15 = ₹135`) = **₹620.00**
-  - Overheads: Labour (`₹1,200`) + Gas/Power (`₹600`) = **₹1,800.00**
-  - **Total Cost:** **₹5,855.00** → **Cost / Good Packet = ₹31.1436** → **Gross Margin vs ₹50 selling price = ₹18.86/pkt (37.7%)**.
+### Hierarchical Unit Conversion & BOM Execution
+- Every `Unit` resolves to its root canonical unit via `(base_unit, factor_to_base)` using `Decimal` arithmetic (`ROUND_HALF_UP`): `1 kg = 1,000 g`, `1 L = 1,000 ml`, `1 ctn = 20 pkt`. Incompatible dimensions (e.g., `L` vs `kg`) are rejected cleanly at BOM validation.
+- For batch multiplier $M$, planned quantity in the material's inventory unit is $\text{Planned} = \text{convert}(\text{standard\_qty} \times M,\; u_{\text{BOM}} \to u_{\text{stock}})$.
+- **Damaged Material Rule:** Total stock deducted per line is $\text{Total Issued} = \text{Actual Used} + \text{Damaged Qty}$ (e.g., Benchmark Pouches: `188 + 6 = 194 pcs` deducted from `500` → `306 pcs`).
+- **Variance & Tolerance Flagging (Default `3%`):**
+  $$\text{Consumption Variance \%} = \frac{\text{Total Issued} - \text{Planned}}{\text{Planned}} \times 100 \qquad \text{Yield Variance \%} = \frac{\text{Actual Good} - \text{Expected Output}}{\text{Expected Output}} \times 100$$
+  Any deviation with $|\text{Variance \%}| > 3.00\%$ sets `has_variance_flag = True` and triggers WebSocket/bell alerts (Benchmark: Oil `+5.00%`, Carton `-10.00%`, Yield `-6.00%`).
 
-### Financial Precision & Audit Trail
-- All monetary and quantity columns use PostgreSQL `NUMERIC` (`Decimal`, `ROUND_HALF_UP`) — never floating-point arithmetic.
-- Zero destructive deletes on posted records: GST invoices are cancelled only via **`CreditNote`** (`CN/2025-26/xxxx`), production runs are reversed via **`CANCELLED`** status + offsetting `StockLedger` `ADJUSTMENT` rows, and payments are reversed via **`REVERSED`** status — all recorded with user, role, and local timestamp in `accounts_auditlog`.
+---
+
+## 3. Costing, Valuation Method & Tax/Audit Integrity
+
+### Valuation Method: Moving Weighted Average Cost (Justification)
+We use **Moving Weighted Average Cost** instead of Last Purchase Price (which over-reacts to one-off price spikes) or FIFO (which assumes strict lot segregation in bulk flour/oil storage bins). On every `OPENING` or `PURCHASE_RECEIPT`, `weighted_avg_cost` updates atomically **before** any production deduction:
+$$\text{New Avg Cost} = \frac{(\text{Existing Qty} \times \text{Old Avg}) + (\text{Receipt Qty} \times \text{Purchase Rate})}{\text{Existing Qty} + \text{Receipt Qty}}$$
+*(Benchmark Flour: $(100\text{ kg} \times ₹42 + 60\text{ kg} \times ₹45) / 160\text{ kg} = ₹43.1250\text{/kg}$.)*
+
+### Overhead Allocation & Benchmark Cost per Packet
+Direct batch overheads (**Labour** + **Gas/Electricity** + **Other**) are recorded against each `ProductionRun` (and mirrored into `Expense`) and divided by **Actual Good Output Packets**, ensuring yield loss accurately reflects higher unit manufacturing cost:
+$$\text{Cost per Good Packet} = \frac{\sum(\text{Raw Issued} \times \text{Avg Cost}) + \sum(\text{Pkg Issued incl. Damaged} \times \text{Avg Cost}) + \text{Overheads}}{\text{Actual Good Packets}}$$
+
+- **Benchmark Computation (Murukku 200 g, `188` good packets):**
+  Raw: Flour (`40 × ₹43.125 = ₹1,725`) + Oil (`10.5 × ₹140 = ₹1,470`) + Spice (`1.2 × ₹200 = ₹240`) = `₹3,435.00` · Packaging: Pouches (`194 × ₹2.50 = ₹485`) + Cartons (`9 × ₹15 = ₹135`) = `₹620.00` · Overheads: Labour `₹1,200` + Gas/Power `₹600` = `₹1,800.00` → **Total `₹5,855.00 / 188 = ₹31.1436 / pkt`** (Margin vs `₹50`: **`₹18.86 / pkt`**, `37.7%`).
+- **GST & Audit Safety:** Intra-state sales split GST evenly into `CGST + SGST` (e.g., TN `5% → 2.5% + 2.5%`); inter-state sales apply `IGST`. All money uses `NUMERIC(14,2)` (`ROUND_HALF_UP`). Posted records are never deleted: invoices use `CreditNote`, runs reverse via `CANCELLED` + ledger `ADJUSTMENT`, and payments reverse via `REVERSED` — all logged with user & timestamp in `AuditLog`.
