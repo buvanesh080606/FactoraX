@@ -1,43 +1,43 @@
-# SmartFactory – Complete Full-Stack Order-to-Audit ERP
+# FactoraX — Complete Full-Stack Order-to-Audit ERP
 
-**One System. Every Role. Complete Control.**
+**Order. Produce. Audit.**
 
-Order-to-Audit ERP prototype for a small-scale South Indian packaged food manufacturer (*Murukku, Mixture, Chips, Sweets*), built for the **Centre for Digital Infrastructure, NIT Tiruchirappalli** internship problem statement.
+Full-stack Order-to-Audit Manufacturing ERP for a South Indian packaged food manufacturer (*Murukku, Mixture, Chips, Traditional Sweets*), built for the **Centre for Digital Infrastructure, NIT Tiruchirappalli** internship problem statement.
 
 ---
 
 ## 1. Tech Stack & Justification
-- **Backend:** Python 3.12, Django 5.1, Django REST Framework, SimpleJWT, Django Channels (Daphne ASGI), ReportLab, openpyxl. Chosen for rapid relational modeling, built-in `transaction.atomic()` + `select_for_update()` concurrency control, native `Decimal` arithmetic, and crisp PDF/Excel generation.
-- **Database:** PostgreSQL 16 (`NUMERIC` precision, foreign keys, row-level locking, append-only `StockLedger`).
-- **Frontend:** React 18, Vite 6, TypeScript, Tailwind CSS, Recharts, React Hook Form + Zod. Provides a responsive Amazon-style mobile/desktop storefront for field salesmen alongside dedicated desktop ERP portals for Admin, Production, Accountant, and Owner.
+- **Backend:** Python 3.12, Django 5.1, Django REST Framework, SimpleJWT, Django Channels (Daphne ASGI), WhiteNoise, ReportLab, openpyxl. Chosen for rapid relational modeling, built-in `transaction.atomic()` + `select_for_update()` row-level concurrency control, native fixed-point `Decimal` arithmetic, and crisp backend PDF/Excel generation.
+- **Database:** PostgreSQL 16 (Neon Serverless PostgreSQL in cloud / PostgreSQL 16 locally) — `NUMERIC` precision, relational foreign keys, row-level locking, and an append-only `StockLedger` as the single source of truth.
+- **Frontend:** React 18, Vite 6, TypeScript, Tailwind CSS, Recharts, React Hook Form + Zod. Provides a fast mobile-first storefront for field salesmen alongside role-tailored desktop ERP workspaces for Admin, Production, Accountant, and Owner.
 
 ---
 
 ## 2. Feature Coverage Against PDF Section 6 Tiers
 
-### Must Have (All Implemented & Tested)
-- [x] Single login with **5 roles** (`SALESMAN`, `ADMIN`, `PRODUCTION`, `ACCOUNTANT`, `OWNER`) + strict backend RBAC
-- [x] Product, Customer, Supplier, Raw Material, Packaging Material, Unit (with conversions), and BOM masters
-- [x] Mobile-friendly Amazon-style Salesman ordering, customer-wise sales, and Admin order verification (qty/price edit + stock check + approve/reject)
+### Must Have (All Implemented & Verified)
+- [x] Single login with **5 roles** (`SALESMAN`, `ADMIN`, `PRODUCTION`, `ACCOUNTANT`, `OWNER`) + automatic role routing & strict server-side RBAC
+- [x] Product, Customer (with salesman assignment), Supplier, Raw Material, Packaging Material, Unit (hierarchical conversions: `kg↔g`, `L↔ml`, `ctn↔pkt`), and BOM masters
+- [x] Mobile-friendly Salesman ordering, order status tracking, customer-wise sales, and Admin order verification (qty/price edit + live stock check + approve/reject)
 - [x] GST-compliant Tax Invoices (`CGST+SGST` intra-state vs `IGST` inter-state, FY numbering), backend **ReportLab PDF** download, and **WhatsApp / Email** customer share links
 - [x] Atomic Production Runs automatically deducting raw/packaging stock (incl. damaged packaging) and adding good finished output
 - [x] Planned vs Actual consumption & yield variance with automatic `>3%` flagging
-- [x] Ledger-derived Stock Summary (`Opening + Receipts - Issues + Adjustments = Closing`) and immutable Stock Ledger
-- [x] 13 Auditor Reports (including Sales Register, GST Outward Supply Summary, Stock Summary/Ledger, Production, Variance, Costing, Payments, Ageing) exportable to **CSV, Excel (`.xlsx`), and PDF**
-- [x] Audit trail + **Credit Note** cancellation for posted invoices (posted invoices are never deleted)
+- [x] Ledger-derived Stock Summary (`Opening + Receipts − Issues ± Adjustments = Closing`) and immutable append-only Stock Ledger
+- [x] 13 Auditor Reports (Sales Register, Customer/Product Sales, GST Outward Supply Summary, Purchase Register, Stock Summary/Ledger, Production, Variance, Costing, Payments, Ageing) exportable to **CSV, Excel (`.xlsx`), and PDF**
+- [x] Role-grouped immutable **Audit Trail** + strict non-destructive reversals (**Credit Note** for posted invoices, `CANCELLED` + ledger reversal for production runs, `REVERSED` status for payments)
 
-### Should Have (All Implemented & Tested)
+### Should Have (All Implemented & Verified)
 - [x] Purchases & Supplier management with automatic ledger receipt & Moving Weighted Average Cost update
-- [x] Payments, invoice allocations, customer outstanding, and ageing buckets (`0-30`, `31-60`, `61-90`, `90+` days)
+- [x] Payments, invoice allocations, customer outstanding, and receivables ageing buckets (`0–30`, `31–60`, `61–90`, `90+` days)
 - [x] Product Costing per good packet with Labour & Gas/Power overheads + gross margin
-- [x] GST Outward Supply Summary report
+- [x] GST Outward Supply Summary report (GSTR-1 / GSTR-3B aligned)
 - [x] Real-time variance & low-stock alerts (WebSockets + notification bell)
-- [x] Owner Executive Dashboard with live KPIs & 5 Recharts charts
+- [x] Owner Executive Dashboard covering all PDF summary metrics (**Today's Orders**, **Stock Levels**, **Variance Alerts (>3%)**, **Cost per Packet**, **Outstanding Dues**) + 5 Recharts visualizations
 
 ### Stretch Goals Built
-- [x] **Offline order capture with sync** (local queue + UUID `idempotency_key` preventing duplicates)
+- [x] **Offline order capture with sync** (local queue + UUID `idempotency_key` preventing duplicate submissions)
 - [x] **Reorder levels & low-stock alerts** for raw materials, packaging, and finished goods
-- [x] **Production planning from pending orders** (automatically calculates shortage & recommended batches per active BOM, e.g., Distributor B's 32-packet shortage → *"Make 1 batch (200 pkt)"*)
+- [x] **Production planning from pending orders** (compares pending demand vs live finished stock and recommends exact BOM batches, e.g., Distributor B's 32-packet shortage → *"Make 1 batch (200 pkt)"*)
 
 ---
 
@@ -45,7 +45,7 @@ Order-to-Audit ERP prototype for a small-scale South Indian packaged food manufa
 
 Seeded repeatably via `python manage.py seed_benchmark --reset` using the exact Section 5 master data and rates:
 
-| Check | Expected (PDF Sec 5) | SmartFactory Output | Status |
+| Check | Expected (PDF Sec 5) | FactoraX Output | Status |
 |---|---|---|---|
 | Flour closing balance | `120 kg` (`100 + 60 − 40`) | `120.000 kg` | Exact Match |
 | Cooking oil closing balance | `19.5 L` (`30 − 10.5`) | `19.500 L` | Exact Match |
@@ -70,37 +70,50 @@ Seeded repeatably via `python manage.py seed_benchmark --reset` using the exact 
 ---
 
 ## 4. Assumptions & Known Gaps
-- **Assumptions:** Moving Weighted Average valuation is used for raw/packaging materials; batch overheads are allocated directly across actual good output packets; damaged pouches (`6`) are included in material cost and deducted from stock.
-- **Known Gaps (Stretch Goals not implemented):** Batch/expiry FEFO tracking, Tally XML export, mock e-Invoice/e-Way Bill JSON, Tamil UI localization, and GPS salesman check-in are not included to keep the core Order-to-Audit loops focused and rock-solid.
+- **Assumptions:** Moving Weighted Average valuation is used for raw/packaging materials; batch overheads are allocated across actual good output packets; damaged pouches (`6`) are included in material cost and deducted from inventory; browser timezone (`X-Client-Timezone`) ensures exact local timestamps across reports and audit trails.
+- **Known Gaps (Unselected Stretch Goals):** Batch/expiry FEFO tracking, Tally XML export, mock e-Invoice/e-Way Bill JSON, Tamil UI localization, and GPS salesman check-in are omitted to keep core Order-to-Audit workflows focused and verifiable.
 
 ---
 
-## 5. Role Logins & Local Startup (`D:\smartbom`)
+## 5. Test Logins & Quick Setup
 
 | Role | Username | Password | Landing Route |
 |---|---|---|---|
-| Salesman A (Retailer A - TN) | `salesman` | `Smart@123` | `/salesman/home` |
-| Salesman B (Distributor B - KA) | `salesman2` | `Smart@123` | `/salesman/home` |
+| Salesman A (Retailer A — TN) | `salesman` | `Smart@123` | `/salesman/home` |
+| Salesman B (Distributor B — KA) | `salesman2` | `Smart@123` | `/salesman/home` |
 | Factory Admin & Billing | `admin` | `Smart@123` | `/admin/dashboard` |
 | Production Supervisor | `production` | `Smart@123` | `/production/dashboard` |
-| Accountant / Auditor | `accountant` | `Smart@123` | `/accountant/dashboard` |
+| Accountant / Auditor (Read-Only) | `accountant` | `Smart@123` | `/accountant/dashboard` |
 | Business Owner | `owner` | `Smart@123` | `/owner/dashboard` |
 
-```powershell
-# 1. Start PostgreSQL 16 (port 5433)
-D:\smartbom\.tools\pgsql\bin\pg_ctl.exe -D D:\smartbom\.tools\pgdata -l D:\smartbom\.tools\pg.log start
+### Local Setup (Backend + Frontend)
+```bash
+# 1. Backend (Python 3.12 + PostgreSQL / Neon DB)
+cd backend
+python -m venv .venv
+# Activate .venv, copy .env.example -> .env and set DATABASE_URL
+pip install -r requirements.txt
+python manage.py migrate
+python manage.py seed_benchmark --reset
+pytest -v
+daphne -b 127.0.0.1 -p 8000 config.asgi:application
 
-# 2. Seed Benchmark Scenario & Run Automated Tests
-powershell -ExecutionPolicy Bypass -File D:\smartbom\.tools\run_backend_verify.ps1
-
-# 3. Start Backend (Daphne ASGI on :8000) & Frontend (Vite on :5173)
-cd D:\smartbom\backend && .\.venv\Scripts\daphne.exe -b 127.0.0.1 -p 8000 config.asgi:application
-powershell -ExecutionPolicy Bypass -File D:\smartbom\.tools\run_vite.ps1
+# 2. Frontend (Node 20+ / Vite)
+cd ../frontend
+npm install
+npm run dev
 ```
 
+### Cloud Deployment (Neon + Render + Vercel + UptimeRobot)
+- **Database:** Provision PostgreSQL 16 on **Neon** (`DATABASE_URL` with `sslmode=require`).
+- **Backend (Render):** Deploy using root [render.yaml](./render.yaml) (`rootDir: backend`, `buildCommand: bash build.sh`, `startCommand: daphne -b 0.0.0.0 -p $PORT config.asgi:application`, `healthCheckPath: /api/health/`).
+- **Frontend (Vercel):** Import `frontend/`, set `VITE_API_BASE_URL=https://<your-render-app>.onrender.com/api`, and deploy ([frontend/vercel.json](./frontend/vercel.json) handles SPA routing).
+- **Monitoring:** Point **UptimeRobot** (`HTTP(s)`, 5-min interval) at `https://<your-render-app>.onrender.com/api/health/`.
+
+---
+
 ## 6. Documentation
-- [DESIGN_NOTE.md](./DESIGN_NOTE.md) (2-page submission architecture & costing note)
-- [DATABASE_SCHEMA.md](./DATABASE_SCHEMA.md)
-- [API_DOCUMENTATION.md](./API_DOCUMENTATION.md)
-- [PROJECT_PLAN.md](./PROJECT_PLAN.md)
-- [IMPLEMENTATION_STATUS.md](./IMPLEMENTATION_STATUS.md)
+- [DESIGN_NOTE.md](./DESIGN_NOTE.md) — 2-page architecture, ER diagram, stock ledger & costing note
+- [DATABASE_SCHEMA.md](./DATABASE_SCHEMA.md) — Relational PostgreSQL table & index reference
+- [API_DOCUMENTATION.md](./API_DOCUMENTATION.md) — REST & WebSocket endpoint reference
+- [PROJECT_PLAN.md](./PROJECT_PLAN.md) & [IMPLEMENTATION_STATUS.md](./IMPLEMENTATION_STATUS.md)

@@ -1,14 +1,14 @@
-# SmartFactory ERP — Architecture & Design Note
+# FactoraX ERP — Architecture & Design Note
 
 **Assignment:** Order-to-Audit System for a Small Food Manufacturer  
 **Institution:** Centre for Digital Infrastructure, NIT Tiruchirappalli  
-**Stack:** React 18 + TypeScript + Tailwind CSS (Vite) · Django 5 + DRF + Channels (ASGI) · PostgreSQL 16
+**Stack:** React 18 + TypeScript + Tailwind CSS (Vite) · Django 5 + DRF + Channels (ASGI) · PostgreSQL 16 (Neon)
 
 ---
 
 ## 1. System Design & Data Model
 
-SmartFactory links two operational loops at a single, immutable source of truth — **`inventory_stockledger`**:
+FactoraX links two operational loops at a single, immutable source of truth — **`inventory_stockledger`**:
 
 - **Sales Loop:** Salesman Mobile Order → Admin Verification (Qty/Price Edit + Live Stock Check) → GST Invoice (`CGST+SGST` intra-state or `IGST` inter-state, FY-numbered, ReportLab PDF) → Dispatch (`SALES_DISPATCH` ledger issue) → Payment Allocation & Ageing (or Audit Credit Note).
 - **Production Loop:** Supplier Purchase (`PURCHASE_RECEIPT` ledger receipt + Weighted Average update) → Active BOM Recipe (with unit conversions) → Atomic Production Run (`PRODUCTION_ISSUE` raw & packaging deductions including damaged packaging + `PRODUCTION_OUTPUT` good finished packets) → Variance Alerts (>3%) & Product Costing.
@@ -76,4 +76,4 @@ erDiagram
 
 ### Financial Precision & Audit Trail
 - All monetary and quantity columns use PostgreSQL `NUMERIC` (`Decimal`, `ROUND_HALF_UP`) — never floating-point arithmetic.
-- Posted GST invoices are immutable and cannot be deleted; reversals are executed via **`CreditNote`** (`CN/2025-26/xxxx`) with mandatory audit reason and optional finished-goods return restock.
+- Zero destructive deletes on posted records: GST invoices are cancelled only via **`CreditNote`** (`CN/2025-26/xxxx`), production runs are reversed via **`CANCELLED`** status + offsetting `StockLedger` `ADJUSTMENT` rows, and payments are reversed via **`REVERSED`** status — all recorded with user, role, and local timestamp in `accounts_auditlog`.
